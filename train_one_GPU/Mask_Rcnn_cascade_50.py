@@ -157,23 +157,22 @@ class Mask_Rcnn(nn.Module):
 
         return roi, loc, label, inter, target[:, 0]
 
-
     def fast_loss(self, fast_logits, fast_loc, label, loc, mask, target):
-            fast_num = label.shape[0]
-            fast_num_P = loc.shape[0]
-            a = torch.arange(fast_num_P)
-            b = label[:fast_num_P].long()
-            fast_loc_train = fast_loc[a, b]
-            fast_cls_loss = ce_loss(fast_logits, label.long())
-            fast_box_loss = SmoothL1Loss(fast_loc_train, loc, 1.0, float(fast_num))
+        fast_num = label.shape[0]
+        fast_num_P = loc.shape[0]
+        a = torch.arange(fast_num_P)
+        b = label[:fast_num_P].long()
+        fast_loc_train = fast_loc[a, b]
+        fast_cls_loss = ce_loss(fast_logits, label.long())
+        fast_box_loss = SmoothL1Loss(fast_loc_train, loc, 1.0, float(fast_num))
 
-            mask_loss = bce_loss(mask[a, b], target)
-            self.c = fast_cls_loss
-            self.d = fast_box_loss
-            self.fast_num = fast_num
-            self.fast_num_P = fast_num_P
-            self.f = mask_loss
-            return fast_cls_loss, fast_box_loss, mask_loss
+        mask_loss = bce_loss(mask[a, b], target)
+        self.c = fast_cls_loss
+        self.d = fast_box_loss
+        self.fast_num = fast_num
+        self.fast_num_P = fast_num_P
+        self.f = mask_loss
+        return fast_cls_loss, fast_box_loss, mask_loss
 
     def process_im(self, x, bboxes):
         x = x[None]
@@ -466,10 +465,10 @@ def train(model, config, step, x, pre_model_file, model_file=None):
                                {'params': bn_weight_p, 'lr': lr},
                                {'params': bias_p, 'lr': lr * config.bias_lr_factor}],
                               momentum=0.9, )
-    scheduler = WarmupMultiStepLR(opt, [60000, 80000], warmup_factor=1 / 3, warmup_iters=500)
+    scheduler = WarmupMultiStepLR(opt, [60000 * x, 80000 * x], warmup_factor=1 / 3, warmup_iters=500)
     dataset = Read_Data(config)
     dataloader = DataLoader(dataset, batch_size=config.batch_size_per_GPU, collate_fn=func,
-                            shuffle=True, drop_last=True, pin_memory=True, num_workers=16)
+                            shuffle=True, drop_last=True, pin_memory=True, num_workers=2)
     epochs = 10000
     flag = False
     print('start:  step=', step)
@@ -490,7 +489,7 @@ def train(model, config, step, x, pre_model_file, model_file=None):
                       'rpn_box_loss:%.4f' % model.b,
                       'fast_cls_loss:%.4f' % model.c, 'fast_box_loss:%.4f' % model.d, 'mask_loss:%.4f' % model.f,
                       model.fast_num,
-                      model.fast_num_P,opt.param_groups[0]['lr'], step)
+                      model.fast_num_P, opt.param_groups[0]['lr'], step)
             step += 1
 
             # if step == int(60000 * x) or step == int(80000 * x):
