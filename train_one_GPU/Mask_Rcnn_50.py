@@ -128,7 +128,7 @@ class Mask_Rcnn(nn.Module):
         masks = masks[..., None]
         masks = masks.permute(0, 3, 1, 2)
 
-        target_norm[:, 1:] = target_norm[:, 1:] / cuda(torch.tensor([W, H, W, H], dtype=torch.float32)) *\
+        target_norm[:, 1:] = target_norm[:, 1:] / cuda(torch.tensor([W, H, W, H], dtype=torch.float32)) * \
                              cuda(torch.tensor([mask_W, mask_H, mask_W, mask_H], dtype=torch.float32))
         target = roi_align(masks, target_norm, (28, 28), 1.0, 2)
         target = torch.round(target)
@@ -379,7 +379,7 @@ def train(model, config, step, x, pre_model_file, model_file=None):
                                {'params': bn_weight_p, 'lr': lr},
                                {'params': bias_p, 'lr': lr * config.bias_lr_factor}],
                               momentum=0.9, )
-    scheduler = WarmupMultiStepLR(opt, [60000, 80000], warmup_factor=1 / 3, warmup_iters=500)
+    scheduler = WarmupMultiStepLR(opt, [60000 * x, 80000 * x], warmup_factor=1 / 3, warmup_iters=500)
     dataset = Read_Data(config)
     dataloader = DataLoader(dataset, batch_size=config.batch_size_per_GPU, collate_fn=func,
                             shuffle=True, drop_last=True, pin_memory=True, num_workers=2)

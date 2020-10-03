@@ -308,7 +308,7 @@ def train(model, config, step, x, pre_model_file, model_file=None):
         [{'params': weight_p, 'weight_decay': config.weight_decay, 'lr': lr},
          {'params': bias_p, 'lr': lr * config.bias_lr_factor}],
         momentum=0.9, )
-    scheduler = WarmupMultiStepLR(opt, [60000, 80000], warmup_factor=1 / 3, warmup_iters=500)
+    scheduler = WarmupMultiStepLR(opt, [60000 * x, 80000 * x], warmup_factor=1 / 3, warmup_iters=500)
     epochs = 10000
     flag = False
     print('start:  step=', step)
