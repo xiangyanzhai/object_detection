@@ -203,7 +203,7 @@ if __name__ == "__main__":
                     roi_test_pre_nms=6000,
                     roi_test_post_nms=1000, )
     model = Faster_Rcnn
-    model_file = r'../train_one_GPU/models/FPN_50_90000_2.pth'
+    model_file = r'../train_one_GPU/models/FPN_50_90000_1.pth'
     test(model, config, model_file)
 
 # [0.832859   0.84634415 0.80093688 0.69832556 0.71472847 0.86016459

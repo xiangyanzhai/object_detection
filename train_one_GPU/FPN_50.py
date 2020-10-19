@@ -337,14 +337,14 @@ def train(model, config, step, x, pre_model_file, model_file=None):
             #         print('*********************************', param_group['lr'])
 
             if (step <= 10000 and step % 1000 == 0) or step % 5000 == 0 or step == 1:
-                torch.save(model.state_dict(), './models/FPN_50_%d_2.pth' % step)
+                torch.save(model.state_dict(), './models/FPN_50_%d_1.pth' % step)
 
             if step >= 90010 * x:
                 flag = True
                 break
         if flag:
             break
-    torch.save(model.state_dict(), './models/FPN_50_final_2.pth')
+    torch.save(model.state_dict(), './models/FPN_50_final_1.pth')
 
 
 if __name__ == "__main__":
