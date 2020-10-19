@@ -2,8 +2,8 @@
 # -*- coding:utf-8 -*-
 import os
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-
+# os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+import argparse
 import numpy as np
 import torch
 import torch.nn as nn
@@ -308,6 +308,116 @@ def train(model, config, step, x, pre_model_file, model_file=None):
     torch.save(model.state_dict(), './models/vgg16_final_1.pth')
 
 
+def train_dist(model, config, step, x, pre_model_file, model_file=None):
+    parser = argparse.ArgumentParser(description="PyTorch Object Detection Training")
+    parser.add_argument("--local_rank", type=int, default=0)
+    args = parser.parse_args()
+    local_rank = args.local_rank
+    print('******************* local_rank', local_rank)
+    torch.cuda.set_device(local_rank)
+    torch.distributed.init_process_group(
+        backend="nccl", init_method="env://"
+    )
+    assert torch.distributed.is_initialized()
+    batch_size = config.gpus * config.batch_size_per_GPU
+    print('--------batch_size--------', batch_size)
+
+    model = model(config)
+    print(model)
+    model.eval()
+    model_dic = model.state_dict()
+
+    pretrained_dict = torch.load(pre_model_file, map_location='cpu')
+    a = pretrained_dict['classifier.0.weight']
+    b = pretrained_dict['classifier.0.bias']
+    c = pretrained_dict['classifier.3.weight']
+    d = pretrained_dict['classifier.3.bias']
+    pretrained_dict = {k: v for k, v in pretrained_dict.items() if k in model_dic}
+    print(len(pretrained_dict))
+    model_dic.update(pretrained_dict)
+    print(list(model_dic.keys()))
+    model_dic['fast.fast_head.0.weight'] = a
+    model_dic['fast.fast_head.0.bias'] = b
+    model_dic['fast.fast_head.2.weight'] = c
+    model_dic['fast.fast_head.2.bias'] = d
+    model.load_state_dict(model_dic)
+
+    if step > 0:
+
+        model.load_state_dict(torch.load(model_file, map_location='cpu'))
+        print(model_file)
+    else:
+        print(pre_model_file)
+
+    parameters = list(model.parameters())
+    for i in range(8):
+        parameters[i].requires_grad = False
+
+    model = torch.nn.parallel.DistributedDataParallel(
+        model.cuda(), device_ids=[local_rank], output_device=local_rank,
+        # this should be removed if we update BatchNorm stats
+        broadcast_buffers=False,
+    )
+
+    train_params = list(model.parameters())[8:]
+
+    bias_p = []
+    weight_p = []
+    for name, p in model.named_parameters():
+        if 'bias' in name:
+            bias_p.append(p)
+        else:
+            weight_p.append(p)
+    print(len(weight_p), len(bias_p))
+    lr = config.lr * config.batch_size_per_GPU
+    if lr >= 60000 * x:
+        lr = lr / 10
+    if lr >= 80000 * x:
+        lr = lr / 10
+    print('lr        ******************', lr)
+
+    opt = torch.optim.SGD([{'params': weight_p, 'weight_decay': config.weight_decay, 'lr': lr},
+                           {'params': bias_p, 'lr': lr * config.bias_lr_factor}],
+                          momentum=0.9, )
+
+    epochs = 10000
+    flag = False
+    dataset = Read_Data(config)
+    train_sampler = torch.utils.data.distributed.DistributedSampler(dataset)
+    dataloader = DataLoader(dataset, batch_size=config.batch_size_per_GPU, sampler=train_sampler,
+                            collate_fn=func, drop_last=True, pin_memory=True)
+    for epoch in range(epochs):
+        train_sampler.set_epoch(epoch)
+
+        for imgs, bboxes, num_b, num_H, num_W in dataloader:
+
+            loss = model(imgs, bboxes, num_b, num_H, num_W)
+            loss = loss / imgs.shape[0]
+            opt.zero_grad()
+            loss.backward()
+            torch.nn.utils.clip_grad_norm_(train_params, 10, norm_type=2)
+            opt.step()
+
+            # torch.cuda.empty_cache()
+            if step % 20 == 0 and local_rank == 0:
+                print(datetime.now(), 'loss:%.4f' % (loss), opt.param_groups[0]['lr'], step)
+            step += 1
+
+            if (step == int(60000 * x) or step == int(80000 * x)):
+                for param_group in opt.param_groups:
+                    param_group['lr'] = param_group['lr'] / 10
+                    print('***************************', param_group['lr'], local_rank)
+            if ((step <= 10000 and step % 1000 == 0) or step % 5000 == 0 or step == 1) and local_rank == 0:
+                torch.save(model.module.state_dict(), './models/vgg16_%dx_%d_1_%d.pth' % (x, step, local_rank))
+            if step >= 90010 * x:
+                flag = True
+                break
+        if flag:
+            break
+    if local_rank == 0:
+        torch.save(model.module.state_dict(), './models/vgg16_%dx_final_1_%d.pth' % (x, local_rank))
+
+
 if __name__ == "__main__":
     Mean = [123.68, 116.78, 103.94]
     Mean = [123.675, 116.280, 103.530, ]
@@ -316,7 +426,8 @@ if __name__ == "__main__":
     img_paths = [path + 'img_paths_07.pkl', path + 'img_paths_12.pkl']
 
     files = [img_paths, Bboxes]
-    config = Config(True, Mean, files, lr=0.001, weight_decay=0.0005, batch_size_per_GPU=1, img_max=1000, img_min=600,
+    config = Config(True, Mean, files, lr=0.001, weight_decay=0.0005, gpus=2, batch_size_per_GPU=2, img_max=1000,
+                    img_min=600,
                     roi_min_size=16,
                     roi_train_pre_nms=12000,
                     roi_train_post_nms=2000,
@@ -331,11 +442,4 @@ if __name__ == "__main__":
     pre_model_file = r'D:/BaiduNetdiskDownload/vgg16_cf.pth'
     pre_model_file = '/home/zhai/PycharmProjects/Demo35/py_Faster_tool/pre_model/vgg16_cf.pth'
     model_file = r''
-    train(model, config, step, x, pre_model_file, model_file=model_file)
-
-
-# [0.73909475 0.78086676 0.7028246  0.60206878 0.61172184 0.82720654
-#  0.83681608 0.85766458 0.55384811 0.77337219 0.63840307 0.83138268
-#  0.84698006 0.76642416 0.7870849  0.44357723 0.75472496 0.67486161
-#  0.81124731 0.74521005]
-# 0.7292690138425238
+    train_dist(model, config, step, x, pre_model_file, model_file=model_file)

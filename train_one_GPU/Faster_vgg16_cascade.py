@@ -2,7 +2,7 @@
 # -*- coding:utf-8 -*-
 import os
 
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'
+os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 
 import numpy as np
 import torch
@@ -62,21 +62,37 @@ class Faster_Rcnn(nn.Module):
                                   n_train_post_nms=config.roi_train_post_nms,
                                   n_test_pre_nms=config.roi_test_pre_nms, n_test_post_nms=config.roi_test_post_nms,
                                   min_size=config.roi_min_size)
-        self.PTC = ProposalTargetCreator(n_sample=config.fast_n_sample,
-                                         pos_ratio=config.fast_pos_ratio, pos_iou_thresh=config.fast_pos_iou_thresh,
-                                         neg_iou_thresh_hi=config.fast_neg_iou_thresh_hi,
-                                         neg_iou_thresh_lo=config.fast_neg_iou_thresh_lo)
+        self.PTC_1 = ProposalTargetCreator(n_sample=config.fast_n_sample,
+                                           pos_ratio=config.fast_pos_ratio,
+                                           pos_iou_thresh=config.fast_pos_iou_thresh,
+                                           neg_iou_thresh_hi=config.fast_neg_iou_thresh_hi,
+                                           neg_iou_thresh_lo=config.fast_neg_iou_thresh_lo)
+        self.PTC_2 = ProposalTargetCreator(n_sample=config.fast_n_sample,
+                                           pos_ratio=config.fast_pos_ratio, pos_iou_thresh=0.6,
+                                           neg_iou_thresh_hi=0.6,
+                                           neg_iou_thresh_lo=config.fast_neg_iou_thresh_lo)
+        self.PTC_3 = ProposalTargetCreator(n_sample=config.fast_n_sample,
+                                           pos_ratio=config.fast_pos_ratio, pos_iou_thresh=0.7,
+                                           neg_iou_thresh_hi=0.7,
+                                           neg_iou_thresh_lo=config.fast_neg_iou_thresh_lo)
 
         self.features = vgg16().features[:-1]
         self.rpn = RPN_net(512, self.num_anchor)
         self.roialign = RoIAlign((7, 7), 1 / 16., 2)
         self.fast = Fast_net(config.num_cls, 512 * 7 * 7, 4096)
+        self.fast_2 = Fast_net(config.num_cls, 512 * 7 * 7, 4096)
+        self.fast_3 = Fast_net(config.num_cls, 512 * 7 * 7, 4096)
         self.a = 0
         self.b = 0
         self.c = 0
         self.d = 0
         self.fast_num = 0
         self.fast_num_P = 0
+
+        self.loc_std1 = [1. / 10, 1. / 10, 1. / 5, 1. / 5]
+        self.loc_std2 = [1. / 20, 1. / 20, 1. / 10, 1. / 10]
+        self.loc_std3 = [1. / 30, 1. / 30, 1. / 15, 1. / 15]
+        self.loss_weights = [1.0, 0.5, 0.25]
 
     def rpn_loss(self, rpn_logits, rpn_loc, bboxes, tanchors, img_size):
         inds, label, indsP, loc = self.ATC(bboxes, tanchors, img_size)
@@ -89,11 +105,9 @@ class Faster_Rcnn(nn.Module):
         self.b = rpn_box_loss
         return rpn_cls_loss, rpn_box_loss
 
-    def fast_train_data(self, loc, score, anchor, img_size, bboxes):
-        roi = self.PC(loc, score, anchor, img_size)
-        roi, loc, label = self.PTC(roi, bboxes[:, :4], bboxes[:, -1].long())
+    def fast_train_data(self, roi, bboxes, PTC, loc_std):
+        roi, loc, label = PTC(roi, bboxes[:, :4], bboxes[:, -1].long(), loc_normalize_std=loc_std)
         roi_inds = cuda(torch.zeros((roi.size()[0], 1)))
-
         roi = torch.cat([roi_inds, roi], dim=1)
         return roi, loc, label
 
@@ -154,17 +168,81 @@ class Faster_Rcnn(nn.Module):
         tanchors = cuda(tanchors.contiguous().view(-1, 4))
 
         rpn_cls_loss, rpn_box_loss = self.rpn_loss(rpn_logits, rpn_loc, bboxes, tanchors, img_size)
-        roi, loc, label = self.fast_train_data(rpn_loc.data, F.softmax(rpn_logits.data, dim=-1)[:, 1], tanchors,
-                                               img_size, bboxes)
 
-        x = self.roialign(x, roi)
-        fast_logits, fast_loc = self.fast(x)
+        cls_loss = 0
+        box_loss = 0
+
+        with torch.no_grad():
+            roi = self.PC(rpn_loc.data, F.softmax(rpn_logits.data, dim=-1)[:, 1], tanchors, img_size)
+            roi, loc, label = self.fast_train_data(roi, bboxes, self.PTC_1, self.loc_std1)
+
+        xx = self.roialign(x, roi)
+        fast_logits, fast_loc = self.fast(xx)
         fast_cls_loss, fast_box_loss = self.fast_loss(fast_logits, fast_loc, label, loc)
-        return rpn_cls_loss + rpn_box_loss + fast_cls_loss + fast_box_loss
+        cls_loss += fast_cls_loss * self.loss_weights[0]
+        box_loss += fast_box_loss * self.loss_weights[0]
+
+        with torch.no_grad():
+            fast_loc = fast_loc[:, 1:] * cuda(torch.tensor(self.loc_std1))
+            score = F.softmax(fast_logits, dim=-1)[:, 1:]
+            _, inds = score.max(dim=-1)
+            t = torch.arange(score.shape[0])
+            fast_loc = fast_loc[t, inds]
+            roi = self.loc2bbox(fast_loc, roi[:, 1:])
+            roi = self.filter_bboxes(roi, img_size, self.config.roi_min_size)
+            roi, loc, label = self.fast_train_data(roi, bboxes, self.PTC_2, self.loc_std2)
+
+        xx = self.roialign(x, roi)
+        fast_logits, fast_loc = self.fast_2(xx)
+        fast_cls_loss, fast_box_loss = self.fast_loss(fast_logits, fast_loc, label, loc)
+        cls_loss += fast_cls_loss * self.loss_weights[1]
+        box_loss += fast_box_loss * self.loss_weights[1]
+
+        with torch.no_grad():
+            fast_loc = fast_loc[:, 1:] * cuda(torch.tensor(self.loc_std2))
+            score = F.softmax(fast_logits, dim=-1)[:, 1:]
+            _, inds = score.max(dim=-1)
+            t = torch.arange(score.shape[0])
+            fast_loc = fast_loc[t, inds]
+            roi = self.loc2bbox(fast_loc, roi[:, 1:])
+            roi = self.filter_bboxes(roi, img_size, self.config.roi_min_size)
+            roi, loc, label = self.fast_train_data(roi, bboxes, self.PTC_3, self.loc_std3)
+
+        xx = self.roialign(x, roi)
+        fast_logits, fast_loc = self.fast_3(xx)
+        fast_cls_loss, fast_box_loss = self.fast_loss(fast_logits, fast_loc, label, loc)
+        cls_loss += fast_cls_loss * self.loss_weights[2]
+        box_loss += fast_box_loss * self.loss_weights[2]
+
+        self.c = cls_loss
+        self.d = box_loss
+        self.fast_num = roi.shape[0]
+        self.fast_num_P = loc.shape[0]
+        return rpn_cls_loss + rpn_box_loss + cls_loss + box_loss
 
     def forward(self, imgs, bboxes, num_b, num_H, num_W):
         loss = list(map(self.get_loss, imgs, bboxes, num_b, num_H, num_W))
         return sum(loss)
+
+    def filter_bboxes(self, roi, img_size, roi_min_size):
+        h, w = img_size
+        roi[:, slice(0, 4, 2)] = torch.clamp(roi[:, slice(0, 4, 2)], 0, w)
+        roi[:, slice(1, 4, 2)] = torch.clamp(roi[:, slice(1, 4, 2)], 0, h)
+        hw = roi[:, 2:4] - roi[:, :2]
+        inds = hw >= roi_min_size
+        inds = inds.all(dim=-1)
+        roi = roi[inds]
+        return roi
+
+    def loc2bbox(self, pre_loc, anchor):
+        c_hw = anchor[..., 2:4] - anchor[..., 0:2]
+        c_yx = anchor[..., :2] + c_hw / 2
+        yx = pre_loc[..., :2] * c_hw + c_yx
+        hw = torch.exp(pre_loc[..., 2:4]) * c_hw
+        yx1 = yx - hw / 2
+        yx2 = yx + hw / 2
+        bboxes = torch.cat((yx1, yx2), dim=-1)
+        return bboxes
 
 
 def func(batch):
@@ -299,13 +377,13 @@ def train(model, config, step, x, pre_model_file, model_file=None):
                     print('*******************************************', param_group['lr'])
 
             if (step <= 10000 and step % 1000 == 0) or step % 5000 == 0 or step == 1:
-                torch.save(model.state_dict(), './models/vgg16_%d_1.pth' % step)
+                torch.save(model.state_dict(), './models/vgg16_cascade_%d_2.pth' % step)
             if step >= 90010 * x:
                 flag = True
                 break
         if flag:
             break
-    torch.save(model.state_dict(), './models/vgg16_final_1.pth')
+    torch.save(model.state_dict(), './models/vgg16_cascade_final_2.pth')
 
 
 if __name__ == "__main__":
@@ -334,8 +412,8 @@ if __name__ == "__main__":
     train(model, config, step, x, pre_model_file, model_file=model_file)
 
 
-# [0.73909475 0.78086676 0.7028246  0.60206878 0.61172184 0.82720654
-#  0.83681608 0.85766458 0.55384811 0.77337219 0.63840307 0.83138268
-#  0.84698006 0.76642416 0.7870849  0.44357723 0.75472496 0.67486161
-#  0.81124731 0.74521005]
-# 0.7292690138425238
+# [0.73351072 0.78503344 0.69132973 0.63138458 0.58528798 0.82239235
+#  0.851365   0.86231853 0.54534462 0.7801986  0.60874029 0.80355819
+#  0.8253125  0.7825999  0.82945381 0.42059568 0.74257421 0.66789822
+#  0.81037902 0.71442469]
+# 0.7246851028121957
