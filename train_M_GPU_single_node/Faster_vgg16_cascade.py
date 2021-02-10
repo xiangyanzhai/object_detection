@@ -4,6 +4,7 @@ import os
 
 # os.environ['CUDA_VISIBLE_DEVICES'] = '1'
 import argparse
+import random
 import numpy as np
 import torch
 import torch.nn as nn
@@ -132,7 +133,7 @@ class Faster_Rcnn(nn.Module):
         ma = max(H, W)
         mi = min(H, W)
         if self.config.multi_scale_train:
-            xx = np.random.choice(self.config.multi_scale)
+            xx = random.choice(self.config.multi_scale)
         else:
             xx = self.config.img_min
         scale = min(self.config.img_max / ma, xx / mi)

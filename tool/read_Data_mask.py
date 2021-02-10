@@ -1,5 +1,6 @@
 # !/usr/bin/python
 # -*- coding:utf-8 -*-
+import os
 import numpy as np
 import cv2
 import joblib
@@ -81,8 +82,8 @@ def adjust_xyxy(bbs, mask):
     bbs = bbs.astype(np.int32)
     x1, y1, x2, y2, cls = bbs
     inds = np.where(mask[y1:y2, x1:x2] == 1)
-    if len(inds[0])==0:
-        return  x1, y1, x2, y2, -2
+    if len(inds[0]) == 0:
+        return x1, y1, x2, y2, -2
     y1, y2 = y1 + min(inds[0]), y1 + max(inds[0])
     x1, x2 = x1 + min(inds[1]), x1 + max(inds[1])
     return x1, y1, x2, y2, cls
@@ -172,11 +173,18 @@ class Read_Data(Dataset):
 
         self.transform = transforms.Compose([transforms.ColorJitter(0.1, 0.1, 0.1, 0.1)])
         self.config = config
+        self.seed_flag = False
 
     def __len__(self):
         return len(self.img_paths)
 
     def __getitem__(self, index):
+        if self.seed_flag == False:
+            pid = os.getpid()
+            np.random.seed(pid + 100)
+            ia.seed(pid + 200)
+            self.seed_flag = True
+
         img = cv2.imread(self.img_paths[index])
         bboxes = self.Bboxes[index].copy()
 

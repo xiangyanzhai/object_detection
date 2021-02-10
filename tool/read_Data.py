@@ -1,5 +1,6 @@
 # !/usr/bin/python
 # -*- coding:utf-8 -*-
+import os
 import numpy as np
 import cv2
 import joblib
@@ -17,16 +18,22 @@ class Read_Data(Dataset):
         for i in config.files[1]:
             self.Bboxes += joblib.load(i)
         self.config = config
+        self.seed_flag = False
 
     def __len__(self):
         return len(self.img_paths)
 
     def __getitem__(self, index):
+        if self.seed_flag == False:
+            pid = os.getpid()
+            np.random.seed(pid + 100)
+            self.seed_flag = True
+        
         img = cv2.imread(self.img_paths[index])
         bboxes = self.Bboxes[index].copy()
         bboxes = bboxes[:, :5]
         H, W = img.shape[:2]
-        if bboxes.shape[0]==0:  #当图片中没有目标时，填充一个bboxes，训练时在get_loss中再过滤掉label<0的，只保留label>=0
+        if bboxes.shape[0] == 0:  # 当图片中没有目标时，填充一个bboxes，训练时在get_loss中再过滤掉label<0的，只保留label>=0
             bboxes = np.array([[W / 4., H / 4., W * 3 / 4., H * 3 / 4., -2]], dtype=np.float32)
 
         if np.random.random() > 0.5:

@@ -3,7 +3,7 @@
 import os
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '1'
-
+import random
 import numpy as np
 import torch
 import torch.nn as nn
@@ -132,7 +132,7 @@ class Faster_Rcnn(nn.Module):
         ma = max(H, W)
         mi = min(H, W)
         if self.config.multi_scale_train:
-            xx = np.random.choice(self.config.multi_scale)
+            xx = random.choice(self.config.multi_scale)
         else:
             xx = self.config.img_min
         scale = min(self.config.img_max / ma, xx / mi)
@@ -411,14 +411,14 @@ if __name__ == "__main__":
     model_file = r''
     train(model, config, step, x, pre_model_file, model_file=model_file)
 
-#2048
+# 2048
 # [0.73351072 0.78503344 0.69132973 0.63138458 0.58528798 0.82239235
 #  0.851365   0.86231853 0.54534462 0.7801986  0.60874029 0.80355819
 #  0.8253125  0.7825999  0.82945381 0.42059568 0.74257421 0.66789822
 #  0.81037902 0.71442469]
 # 0.7246851028121957
 
-#4096
+# 4096
 # [0.73201822 0.79195918 0.7118512  0.62649153 0.60470081 0.83662776
 #  0.84649766 0.85184827 0.55873052 0.7949494  0.63954595 0.81187491
 #  0.81833304 0.76331193 0.82676833 0.44328848 0.74002965 0.67983149

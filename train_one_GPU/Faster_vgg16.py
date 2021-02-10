@@ -3,7 +3,7 @@
 import os
 
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'
-
+import random
 import numpy as np
 import torch
 import torch.nn as nn
@@ -118,7 +118,7 @@ class Faster_Rcnn(nn.Module):
         ma = max(H, W)
         mi = min(H, W)
         if self.config.multi_scale_train:
-            xx = np.random.choice(self.config.multi_scale)
+            xx = random.choice(self.config.multi_scale)
         else:
             xx = self.config.img_min
         scale = min(self.config.img_max / ma, xx / mi)
@@ -332,7 +332,6 @@ if __name__ == "__main__":
     pre_model_file = '/home/zhai/PycharmProjects/Demo35/py_Faster_tool/pre_model/vgg16_cf.pth'
     model_file = r''
     train(model, config, step, x, pre_model_file, model_file=model_file)
-
 
 # [0.73909475 0.78086676 0.7028246  0.60206878 0.61172184 0.82720654
 #  0.83681608 0.85766458 0.55384811 0.77337219 0.63840307 0.83138268
