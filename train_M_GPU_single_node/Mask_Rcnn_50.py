@@ -1,6 +1,9 @@
 # !/usr/bin/python
 # -*- coding:utf-8 -*-
 import os
+import sys
+
+sys.path.append('..')
 import argparse
 import random
 import numpy as np
@@ -460,7 +463,7 @@ def train_dist(model, config, step, x, pre_model_file, model_file=None):
         broadcast_buffers=False,
     )
 
-    lr = config.lr * config.batch_size_per_GPU
+    lr = config.lr * config.batch_size_per_GPU * config.gpus
     if step >= 60000 * x:
         lr = lr / 10
     if step >= 80000 * x:
@@ -508,7 +511,7 @@ def train_dist(model, config, step, x, pre_model_file, model_file=None):
             loss = loss / imgs.shape[0]
             opt.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(train_params, 5, norm_type=2)
+            # torch.nn.utils.clip_grad_norm_(train_params, 5, norm_type=2)
             opt.step()
             scheduler.step()
             if step % 20 == 0 and local_rank == 0:
@@ -558,6 +561,5 @@ if __name__ == "__main__":
     model = Mask_Rcnn
     x = 4
     pre_model_file = r'D:\BaiduNetdiskDownload\pytorch_resnet_caffe/resnet50-caffe.pth'
-    pre_model_file = '/home/zhai/PycharmProjects/Demo35/pytorch_Faster_tool/resnet_caffe/resnet50-caffe.pth'
-    model_file = r''
-    train_dist(model, config, step, x, pre_model_file, model_file=model_file)
+    pre_model_file = '/home/ubuntu/zhai/pytorch_resnet_caffe/resnet50-caffe.pth'
+    train_dist(model, config, step, x, pre_model_file, model_file=None)
